@@ -1,0 +1,262 @@
+---
+title: "Bayesian Credible Subgroups( ZINB logit model) log(time) as a offset"
+author: "80% Credible level "
+output: pdf_document
+---
+
+
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+library(kableExtra)
+library(rjags)
+library(credsubs)
+library(mosaic)
+source('jags_analysis.R')
+
+sun=read.csv('sunwei.csv')
+
+
+sun= subset(sun, sun$end== 1)
+
+covariate=sun[,c(1:5,9)]
+y=sun$count;n=nrow(sun)
+data=list(y=y,covariate=covariate)
+
+
+
+
+#names(covariate)
+#table(Treatment=covariate$treat,counts=data$y)
+ #hist(data$y,main='Histogram of number of tumors',xlab='Number of counts')
+```
+
+```{r,echo=FALSE}
+negbinJag = function(Model,data, nIter){
+ y=data$y
+  covariate=data$covariate
+  
+  #Z matrix is the design matrix for Logistic regression
+  
+   Z = cbind(1,trt=covariate$treat,initnr=covariate$initnr,
+            size=covariate$size)
+   
+  #X matrix is the design matrix for Poisson regression
+   
+ X = cbind(1,trt=covariate$treat,initnr=covariate$initnr,
+           size=covariate$size,
+           initnrtrt=covariate$initnr*covariate$treat,
+           sizetrt =covariate$size*covariate$treat)
+ 
+  offset.variable=covariate$month
+  
+  params = c('alpha','beta','indx','indz','size')
+  ##parameters we want posterior 
+  
+   datalist1 <- list(X=X, Z=Z,y=y,n=n,offset.variable=offset.variable,nKx=ncol(X),nKz=ncol(Z),Kp=2,Kz=2)
+ 
+  ###JAGS for zipmodel1
+  jagsmodel1 <- jags.model(textConnection(zipModelkm_negbintt),data=datalist1,quiet=TRUE)
+  
+  
+  ###Posterior Sample for zipmodel1
+  posteriorSample<- coda.samples(jagsmodel1, params , n.thin=20, n.chains=3,n.burnin=500, n.iter=nIter, progress.bar='none')
+  posteriorSample=posteriorSample[[1]]
+  
+ return(list(pos.logit = as.matrix(posteriorSample[,1:ncol(Z)]),
+        pos.log =as.matrix(posteriorSample[,(ncol(Z)+1):(ncol(Z)+ncol(X))]),
+         size =as.matrix(posteriorSample[,17]),
+              posteriorSummary=round(summary(posteriorSample)[[1]][,1],4)))
+
+  
+  
+  
+}
+```  
+
+```{r,echo=FALSE}
+##########################################################
+nIter=15000;zeta.diff = 0;cred.level=0.8
+###########################################################
+
+JagResults=negbinJag(negbinJag,data,nIter)
+JagResults$posteriorSummary
+
+size=JagResults$size
+
+mean_size=colMeans(JagResults$size)
+
+  
+```
+
+
+
+```{r,echo=FALSE}
+post= matrix(NA,nrow=12,ncol = 5)
+colnames(post)=c("Effect","coefficient","P(Inclusion)","Posterior Mean","Posterior SD")
+post[,1]=c("Logistic regression","Intercept","Treatment","Initnr","Size","Poisson Regression Model","Intercept","Treatment","Init","Size","Size*Treatment","Initnr*Treatment")
+post[,2]=c("-","Alpha 0","Alpha 1","Alpha 2","Alpha 3","-","Beta 0","Beta 1","Beta 2","Beta 3","Beta 4","Beta 5")
+
+post[,3]=c("-","-","-",round(JagResults$posteriorSummary[15:16],3),"-","-","-",round(JagResults$posteriorSummary[11:14],3))
+
+post[,4]=c("-",round(JagResults$posteriorSummary[1:4],3),"-",round(JagResults$posteriorSummary[5:10],3))
+
+post[,5]=c("-",round(apply(JagResults$pos.logit,2,sd),3),"-",round(apply(JagResults$pos.log,2,sd),3))
+
+kable(post,caption = "Posterior summaries of coefficients in dataset")
+ 
+ 
+```
+
+
+
+```{r,echo=FALSE}
+ #part 2 - COnstruction of Bayesian Credible subgroups
+
+
+#CalRegression- Find the expected value for the number of outcomes
+CalRegression = function(design, coef.zero, coef.negbin){
+  # Construct grid on predictive covariate region of interest
+  Z.design = cbind(1,trt=design$treat,initnr=design$initnr,
+            size=design$size)
+   
+  #X matrix is the design matrix for Poisson regression
+   
+ X.design = cbind(1,trt=design$treat,initnr=design$initnr,
+           size=design$size,
+           initnrtrt=design$initnr*design$treat,
+           sizetrt =design$size*design$treat)
+ 
+  #design=designCtrl
+  nIter = nrow(JagResults$pos.logit)# number of iterations
+  nsubj = nrow(design)# different characteristics of patient
+  
+  ##empty matrices
+  e.zero = matrix(0, nIter, nsubj)#(1-theta) = probability rv is negbinson
+  e.negbin = matrix(0, nIter, nsubj)# mean of the negative binomial.
+  
+  for(isubj in 1:nsubj){
+    e.zero[,isubj] = as.vector(1/(1+exp(Z.design[isubj,]%*%t(coef.zero))))
+    e.negbin[,isubj]=as.vector(((exp(X.design[isubj,]%*%t(coef.negbin)))))
+  }
+  
+  return(list(e.zero=e.zero, e.negbin=e.negbin))
+}
+
+
+
+###################################################################################
+
+# Construct grid on predictive covariate region of interest
+designTrt = expand.grid(initnr= c(1:8),
+                        size=c(1:7),
+                        month=c(1:53),
+                        treat = c(1))
+designCtrl = expand.grid(initnr= c(1:8),
+                         size=c(1:7),
+                         month=c(1:53),
+                        treat = c(0))
+
+###############################################################################
+
+####Expected mean of response for treatment group
+e.trt = CalRegression(design=designTrt, coef.zero = JagResults$pos.logit, coef.negbin=JagResults$pos.log)
+
+####Expected mean of response for treatment group
+e.ctrl = CalRegression(design=designCtrl, coef.zero = JagResults$pos.logit,  coef.negbin=JagResults$pos.log)
+
+nsubj = nrow(designTrt )
+
+safety.diff  = matrix(0, nIter, nsubj)
+
+
+
+
+for(isubj in 1:nsubj){
+  safety.diff[,isubj] =(e.trt$e.zero[,isubj]*e.trt$e.negbin[,isubj])-
+    (e.ctrl$e.zero[,isubj]*e.ctrl$e.negbin[,isubj])
+  }
+
+
+
+
+cs.diff = credsubs(params = -safety.diff, design = NULL,
+                   threshold=-zeta.diff, cred.level = cred.level)
+
+
+#diff
+D.diff=cs.diff$exclusive;S.diff=cs.diff$inclusive ; Sc.diff=!S.diff
+
+
+
+
+
+```
+
+```{r,echo=FALSE}
+#dataframe of results
+
+grid = expand.grid(initnr= 1:8,size=1:7)
+results=data.frame(grid,D.diff,S.diff,Sc.diff)
+
+# create a new column called SnotD
+
+n <- dim(results)[1]
+
+SnotD <- rep(0,n)
+for (i in 1:n){
+  if (results$D.diff[i]=="TRUE"&&results$S.diff[i]=="TRUE") {
+    SnotD[i] <- "FALSE"
+  }
+  else if(results$D.diff[i]=="TRUE"&&results$S.diff[i]=="FALSE"){
+    SnotD[i] <- "FALSE"
+  }
+   else if(results$D.diff[i]=="FALSE"&&results$S.diff[i]=="TRUE"){
+    SnotD[i] <- "FALSE"
+   }
+  
+   else (SnotD[i] <- "TRUE")
+  
+}
+
+grid <- data.frame(results, SnotD)
+
+
+# create a new column called Region
+
+n <- dim(results)[1]
+
+Region <- rep(0,n)
+for (i in 1:n){
+  if (results$D.diff[i]=="TRUE"&&results$S.diff[i]=="TRUE") {
+    Region[i] <- "D"
+  }
+  else if(results$D.diff[i]=="TRUE"&&results$S.diff[i]=="FALSE"){
+    Region[i] <- "D"
+  }
+   else if(results$D.diff[i]=="FALSE"&&results$S.diff[i]=="TRUE"){
+    Region[i] <- "S remove D"
+   }
+  
+   else (Region[i] <- "S complement")
+  
+}
+gridf <- data.frame(results, SnotD,Region)
+
+
+
+```
+
+```{r,echo=FALSE}
+
+pl=ggplot(data=gridf)+
+   geom_point(mapping=aes(x=initnr,y=size,color=Region))  +
+  theme_classic()+
+  xlab("Number of intial tumors") + ylab("Tumor size")
+
+pl+scale_color_manual(breaks = c("D","S remove D","S complement"),values = c("chartreuse4","darkorange1","dodgerblue2"))
+
+
+
+
+```
