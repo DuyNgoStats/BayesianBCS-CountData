@@ -1,0 +1,276 @@
+---
+title: "Bayesian Credible Subgroups( ZINB logit model) log(time) as a offset"
+author: "80% Credible level "
+output: pdf_document
+---
+
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+set.seed(100)
+library(kableExtra)
+library(rjags)
+library(credsubs)
+library(mosaic)
+source('jags_analysis.R')
+
+sun=read.csv('sunwei.csv')
+
+
+sun= subset(sun, sun$end== 1)
+
+covariate=sun[,c(1:5,9)]
+y=sun$count;n=nrow(sun)
+data=list(y=y,covariate=covariate)
+
+
+
+#table(Treatment=covariate$treat,counts=data$y)
+ #hist(data$y,main='Histogram of number of tumors',xlab='Number of counts')
+```
+
+
+```{r,echo=FALSE}
+NegbinJag = function(Model,data, nIter){
+ y=data$y
+  covariate=data$covariate
+  
+  #Z matrix is the design matrix for Logistic regression
+  
+   Z = cbind(1,trt=covariate$treat,initnr=covariate$initnr,
+            size=covariate$size,
+            initnrtrt=covariate$initnr*covariate$treat,
+            sizetrt =covariate$size*covariate$treat)
+   
+  #X matrix is the design matrix for Poisson regression
+   
+ X = cbind(1,trt=covariate$treat,initnr=covariate$initnr,
+           size=covariate$size,
+           initnrtrt=covariate$initnr*covariate$treat,
+           sizetrt =covariate$size*covariate$treat)
+ 
+  offset.variable=covariate$month
+  
+  
+
+  params = c('alpha','beta','indx','indz','size')
+  ##parameters we want posterior 
+  
+  datalist1 <- list(X=X, Z=Z,y=y,n=n,offset.variable=offset.variable,nKx=ncol(X),nKz=ncol(Z),Kp=2,Kz=2)
+  
+ 
+  
+  ###JAGS for zipmodel1
+  jagsmodel1 <- jags.model(textConnection(ZINBlogit),data=datalist1,quiet=TRUE)
+  
+  
+  
+  ###Posterior Sample for zipmodel1
+  posteriorSample<- coda.samples(jagsmodel1, params , n.thin=20, n.chains=3,n.burnin=500, n.iter=nIter, progress.bar='none')
+  posteriorSample=posteriorSample[[1]]
+  
+  #return(list(pos.logit = as.matrix(posteriorSample[,1:6]),
+   #     pos.log =as.matrix(posteriorSample[,7:13]),
+    #          posteriorSummary=round(summary(posteriorSample)[[1]][,1],4)))
+  
+  return(list(pos.logit = as.matrix(posteriorSample[,1:ncol(Z)]),
+        pos.log =as.matrix(posteriorSample[,(ncol(Z)+1):(ncol(Z)+ncol(X))]),
+              posteriorSummary=round(summary(posteriorSample)[[1]][,1],4)))
+
+}
+```  
+
+```{r,echo=FALSE}
+##########################################################
+nIter=15000;zeta.diff =0 ;cred.level=0.80
+###########################################################
+
+JagResults=NegbinJag(NegbinJag, data, nIter)
+
+#JagResults$posteriorSummary
+  
+```
+
+
+
+```{r,echo=FALSE}
+post= matrix(NA,nrow=14,ncol = 4)
+colnames(post)=c("Covariate","Posterior Mean","Posterior SD","P(Inclusion)")
+post[,1]=c("Logistic regression","Intercept","Treatment","Initnr","Size",
+           "Initnr*Treatment","Size*Treatment", 
+           "Poisson Regression Model",  "Intercept","Treatment","Init",
+           "Size","Initnr*Treatment","Size*Treatment")
+
+post[,2]=c("-",round(JagResults$posteriorSummary[1:6],3),"-",round(JagResults$posteriorSummary[7:12],3))
+
+post[,3]=c("-",round(apply(JagResults$pos.logit,2,sd),3),"-",round(apply(JagResults$pos.log,2,sd),3))
+post[,4]=c("-","-","-",round(JagResults$posteriorSummary[17:20],3),"-","-","-",round(JagResults$posteriorSummary[13:16],3))
+
+
+kable(post,caption = "Posterior summaries of coefficients in dataset")
+ 
+ 
+```
+
+
+
+```{r,echo=FALSE}
+ #part 2 - COnstruction of Bayesian Credible subgroups
+
+
+#CalRegression- Find the expected value for the number of outcomes
+CalRegression = function(design, coef.zero, coef.pois){
+  # Construct grid on predictive covariate region of interest
+  
+   Z.design = cbind(1,trt=design$treat,initnr=design$initnr,
+            size=design$size,
+            initnrtrt=design$initnr*design$treat,
+           sizetrt =design$size*design$treat)
+   
+  #X matrix is the design matrix for Poisson regression
+   
+ X.design = cbind(1,trt=design$treat,initnr=design$initnr,
+           size=design$size,
+           initnrtrt=design$initnr*design$treat,
+           sizetrt =design$size*design$treat)
+ 
+   
+  
+  
+  #design=designCtrl
+  nIter = nrow(JagResults$pos.logit)# number of iterations
+  nsubj = nrow(design)# different characteristics of patient
+  
+  ##empty matrices
+  e.zero = matrix(0, nIter, nsubj)#(1-theta) = probability rv is poisson
+  e.pois = matrix(0, nIter, nsubj)#(mu) mean of the poisson.
+  
+  for(isubj in 1:nsubj){
+    e.zero[,isubj] = as.vector(1/(1+exp(Z.design[isubj,]%*%t(coef.zero))))
+    e.pois[,isubj] = as.vector(exp(X.design[isubj,]%*%t(coef.pois)))
+  }
+  
+  return(list(e.zero=e.zero, e.pois=e.pois))
+}
+
+
+
+###################################################################################
+
+# Construct grid on predictive covariate region of interest
+designTrt = expand.grid(initnr= c(1:8),
+                        size=c(1:7),
+                        treat = c(1))
+designCtrl = expand.grid(initnr= c(1:8),
+                         size=c(1:7),
+                         treat = c(0))
+###############################################################################
+
+####Expected mean of response for treatment group
+e.trt = CalRegression(design=designTrt, coef.zero = JagResults$pos.logit, coef.pois=JagResults$pos.log)
+
+####Expected mean of response for treatment group
+e.ctrl = CalRegression(design=designCtrl, coef.zero = JagResults$pos.logit,  coef.pois=JagResults$pos.log)
+
+nsubj = nrow(designTrt )
+
+safety.diff  = matrix(0, nIter, nsubj)
+
+#safety.diff is used to calculate the Estimated Personalized Treatment Effect.
+#for(isubj in 1:nsubj){
+ # safety.ratio[,isubj] = ((e.trt$e.zero[,isubj])*(e.trt$e.pois[,isubj]))/
+  #  ((e.ctrl$e.zero[,isubj])*(e.ctrl$e.pois[,isubj]))
+#}
+
+
+for(isubj in 1:nsubj){
+  safety.diff[,isubj] = ((e.trt$e.zero[,isubj])*(e.trt$e.pois[,isubj]))-
+    ((e.ctrl$e.zero[,isubj])*(e.ctrl$e.pois[,isubj]))
+}
+
+
+
+###Credible Subgroups
+#cs.ratio = credsubs(params = safety.ratio, design = NULL, threshold= zeta.ratio, cred.level = cred.level)
+
+
+cs.diff = credsubs(params = -safety.diff, design = NULL,
+                   threshold=-zeta.diff, cred.level = cred.level)
+
+
+#diff
+D.diff=cs.diff$exclusive;S.diff=cs.diff$inclusive ; Sc.diff=!S.diff
+
+
+
+
+
+```
+
+```{r,echo=FALSE}
+#dataframe of results
+
+grid = expand.grid(initnr= 1:8,size=1:7)
+results=data.frame(grid,D.diff,S.diff,Sc.diff)
+
+# create a new column called SnotD
+
+n <- dim(results)[1]
+
+SnotD <- rep(0,n)
+for (i in 1:n){
+  if (results$D.diff[i]=="TRUE"&&results$S.diff[i]=="TRUE") {
+    SnotD[i] <- "FALSE"
+  }
+  else if(results$D.diff[i]=="TRUE"&&results$S.diff[i]=="FALSE"){
+    SnotD[i] <- "FALSE"
+  }
+   else if(results$D.diff[i]=="FALSE"&&results$S.diff[i]=="FALSE"){
+    SnotD[i] <- "FALSE"
+   }
+  
+   else (SnotD[i] <- "TRUE")
+  
+}
+
+grid <- data.frame(results, SnotD)
+
+
+# create a new column called Region
+
+n <- dim(results)[1]
+
+Region <- rep(0,n)
+for (i in 1:n){
+  if (results$D.diff[i]=="TRUE"&&results$S.diff[i]=="TRUE") {
+    Region[i] <- "D"
+  }
+  else if(results$D.diff[i]=="TRUE"&&results$S.diff[i]=="FALSE"){
+    Region[i] <- "D"
+  }
+   else if(results$D.diff[i]=="FALSE"&&results$S.diff[i]=="TRUE"){
+    Region[i] <- "S remove D"
+   }
+  
+   else (Region[i] <- "S complement")
+  
+}
+gridf <- data.frame(results, SnotD,Region)
+
+
+
+```
+
+```{r,echo=FALSE}
+
+
+pl=ggplot(data=gridf)+
+   geom_point(mapping=aes(x=initnr,y=size,color=Region,shape=Region), size=3)  +
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(colour = "black", fill=NA, linewidth=1))+
+  xlab("Number of intial tumors") + ylab("Tumor size") +
+   scale_color_manual(breaks = c("D","S remove D","S complement"),values =   c("chartreuse4","darkorange1","dodgerblue2")) +
+  scale_shape_manual(breaks = c("D","S remove D","S complement"),values = c(15, 19, 17))
+
+pl
+ggsave("BCS ZINB logit.png")
+```
