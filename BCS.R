@@ -210,4 +210,57 @@ specificity <- sum(test.negative & true.negative) / sum(true.negative)
   return(c(sensitivity=sensitivity,specificity=specificity))
 }
 
+##############################################################
+##############################################################
+ComputeTruePTE = function(beta, alpha, x2.range){
+  design = expand.grid(x1 = 0,
+                       x2 = x2.range,
+                       x3 = c(1))
+  X.design = cbind(intercept = 1,
+                   x1=design$x1,
+                   x2=design$x2,
+                   x3=design$x3,
+                   x4=design$x1 * design$x3,
+                   x5=design$x2 * design$x3
+  )
+  Z.design = cbind(intercept = 1,
+                   z1 = design$x1,
+                   z2 = design$x2,
+                   z3 = design$x3,
+                   z4 = design$x1 * design$x3,
+                   z5 = design$x2 * design$x3
+  )
+  e.zero = as.vector(1/(1+exp(Z.design%*%(alpha))))
+  e.pois = as.vector(exp(X.design%*%(beta)))
+  e.trt = data.frame(e.zero = e.zero, e.pois = e.pois)
+  
+  ## Control
+  design = expand.grid(x1 = 0,
+                       x2 = x2.range,
+                       x3 = c(0))
+  X.design = cbind(intercept = 1,
+                   x1=design$x1,
+                   x2=design$x2,
+                   x3=design$x3,
+                   x4=design$x1 * design$x3,
+                   x5=design$x2 * design$x3
+  )
+  Z.design = cbind(intercept = 1,
+                   z1 = design$x1,
+                   z2 = design$x2,
+                   z3 = design$x3,
+                   z4 = design$x1 * design$x3,
+                   z5 = design$x2 * design$x3
+  )
+  e.zero = as.vector(1/(1+exp(Z.design%*%(alpha))))
+  e.pois = as.vector(exp(X.design%*%(beta)))
+  e.ctrl = data.frame(e.zero = e.zero, e.pois = e.pois)
+  
+  pte = (e.trt$e.zero)*e.trt$e.pois - 
+    (e.ctrl$e.zero)*e.ctrl$e.pois
+  
+  return(pte)
+}
+
+
 
