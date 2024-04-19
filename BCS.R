@@ -265,7 +265,7 @@ ComputeTruePTE = function(beta, alpha, x2.range){
 ##############################################################
 ##############################################################
 RunSimulate = function(sample.size, nsim = 1000, nIter = 10000, 
-                       cred.level = 0.8, zeta.diff = 0, beta, alpha, progress = TRUE){
+                       cred.level = 0.8, zeta.diff = 0, x2, beta, alpha, link, progress = TRUE){
   results.ls = list()
   for(i.size in 1:length(sample.size)){
     n = sample.size[i.size]
@@ -282,7 +282,7 @@ RunSimulate = function(sample.size, nsim = 1000, nIter = 10000,
       X = matrix(0, n, 6)
       X[,1] = 1 ## intercept
       X[,2] = rbinom(n, 1, 0.5) 
-      X[,3] = runif(n, -4, 4) 
+      X[,3] = runif(n, x2[1], x2[2]) 
       X[,4] = rbinom(n,1,0.5) ##treatment
       X[,5] = X[,2] * X[, 4]
       X[,6] = X[,3] * X[, 4]
@@ -295,7 +295,7 @@ RunSimulate = function(sample.size, nsim = 1000, nIter = 10000,
       Z[,5] = Z[,2] * Z[,4]
       Z[,6] = Z[,3] * Z[,4]
       
-      data=simulateData(n, X, Z, beta, alpha, linkfunction = 'logit')
+      data=simulateData(n, X, Z, beta, alpha, linkfunction = link)
       
       datajags = list(y = data$y, X = X, Z=Z)
       
@@ -359,4 +359,5 @@ RunSimulate = function(sample.size, nsim = 1000, nIter = 10000,
   }
   results.ls
 }
+
 
