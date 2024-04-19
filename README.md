@@ -1,0 +1,1 @@
+We provide a Bayesian credible subgroups method using continuous shrinkage priors to assess heterogeneity in treatment effects and multiplicity–adjusted benefiting subgroup identification for zero–inflated count data, which are often encountered in medical and public health studies.
