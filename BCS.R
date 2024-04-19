@@ -1,5 +1,8 @@
 library(credsubs)
 library(rjags)
+library(mpath)
+library(pscl)
+library(VGAM)
 
 ### n: number of subjects.
 ### X, beta: covariate and coef of Poisson component.
