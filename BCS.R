@@ -262,5 +262,101 @@ ComputeTruePTE = function(beta, alpha, x2.range){
   return(pte)
 }
 
-
+##############################################################
+##############################################################
+RunSimulate = function(sample.size, nsim = 1000, nIter = 10000, 
+                       cred.level = 0.8, zeta.diff = 0, beta, alpha, progress = TRUE){
+  results.ls = list()
+  for(i.size in 1:length(sample.size)){
+    n = sample.size[i.size]
+    cs.spikelab = matrix(0,nsim,5)
+    cs.standard = cs.pointwise = cs.hh = cs.spikelab 
+    
+    results= matrix(0,nsim,13)
+    
+    for(i in 1:nsim){
+      if(progress){
+        print(paste('Sample size  ', n, '.  Simulated Data ', i))
+      }
+      
+      X = matrix(0, n, 6)
+      X[,1] = 1 ## intercept
+      X[,2] = rbinom(n, 1, 0.5) 
+      X[,3] = runif(n, -4, 4) 
+      X[,4] = rbinom(n,1,0.5) ##treatment
+      X[,5] = X[,2] * X[, 4]
+      X[,6] = X[,3] * X[, 4]
+      
+      Z = matrix(0, n, 6)
+      Z[,1] = 1 ## intercept
+      Z[,2] = rbinom(n, 1, 0.5)  
+      Z[,3] = X[,3]
+      Z[,4] = X[,4] # treatment
+      Z[,5] = Z[,2] * Z[,4]
+      Z[,6] = Z[,3] * Z[,4]
+      
+      data=simulateData(n, X, Z, beta, alpha, linkfunction = 'logit')
+      
+      datajags = list(y = data$y, X = X, Z=Z)
+      
+      JagResults0=PoissonJag(textConnection(zipModel),datajags,nIter)
+      JagResults1=PoissonJag(textConnection(zipModel_spikeslab),datajags,nIter)
+      JagResults2=PoissonJag(textConnection(zipModel_horseshoe),datajags,nIter)
+      
+      ############################################################
+      ############################################################
+      ### design matrix
+      # Construct grid on predictive covariate region of interest
+      designTrt = expand.grid(x1 = range(X[,2]),
+                              x2 = seq(min(X[,3]), max(X[,3]), length.out=50),
+                              x3 = c(1))
+      z1 = designTrt$x1
+      z2 = designTrt$x2
+      designTrt = cbind(designTrt, z1, z2)
+      
+      designCtrl = designTrt
+      designCtrl$x3 = 0
+      
+      pte.standard =  ComputePTE(designTrt, designCtrl, coef.zero=JagResults0$pos.logit[c(4000:9000),], 
+                                 coef.pois=JagResults0$pos.log[c(4000:9000),], alpha, beta)
+      
+      pte.spikeslab =  ComputePTE(designTrt, designCtrl, coef.zero=JagResults1$pos.logit[c(4000:9000),], 
+                                  coef.pois=JagResults1$pos.log[c(4000:9000),], alpha, beta)
+      
+      pte.hh = ComputePTE(designTrt, designCtrl, coef.zero=JagResults2$pos.logit[c(4000:9000),], 
+                          coef.pois=JagResults2$pos.log[c(4000:9000),], alpha, beta)
+      
+      ### Compute estimated personalized treatment effect
+      real.safety.diff  = pte.spikeslab$real.safety.diff
+      
+      #### Compute the true personalized treatment effect
+      real.subgroup.fromDesign.diff <- real.safety.diff  > zeta.diff
+      
+      cs.standard[i, ] = CSSafety(est.safety= pte.standard$safety.diff, real.safety = real.safety.diff, 
+                                  real.subgroup.fromDesign=real.subgroup.fromDesign.diff, 
+                                  zeta=zeta.diff, cred.level=cred.level)
+      
+      cs.spikelab[i,] = CSSafety(est.safety= pte.spikeslab$safety.diff, real.safety = real.safety.diff, 
+                                 real.subgroup.fromDesign=real.subgroup.fromDesign.diff, 
+                                 zeta=zeta.diff, cred.level=cred.level)
+      cs.pointwise[i,] = CSSafetyPointwise(safety.diff = pte.spikeslab$safety.diff, df = nrow(pte.spikeslab$safety.diff)-1, 
+                                           real.safety.diff, real.subgroup.fromDesign.diff,
+                                           zeta=zeta.diff, cred.level=cred.level)
+      cs.hh[i,] = CSSafety(est.safety= pte.hh$safety.diff, real.safety = real.safety.diff, 
+                           real.subgroup.fromDesign=real.subgroup.fromDesign.diff, 
+                           zeta=zeta.diff, cred.level=cred.level)
+      #results[i,]=JagResults$posteriorSummary[1:13]
+    }
+    
+    results = matrix(c(round(colMeans(cs.standard), 3),
+                       round(colMeans(cs.spikelab), 3),
+                       round(colMeans(cs.hh),3),
+                       round(colMeans(cs.pointwise), 3)), 4, ncol(cs.spikelab), byrow = TRUE)
+    rownames(results) = c('Standard',  'Spike Lab', 'Horseshoe', 'Pointwise')
+    colnames(results) = c('Total Coverage', 'Pair Size', 'Sensitivity', "Specificity", 'MSE')
+    results.ls[[i.size]] = results
+    names(results.ls)[[i.size]] = paste0('n=', sample.size[i.size])
+  }
+  results.ls
+}
 
