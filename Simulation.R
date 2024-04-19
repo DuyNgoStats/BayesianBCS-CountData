@@ -1,16 +1,18 @@
 source('BCS.R')
 source('sim_jags.R')
 
-##############################################################################
-##############################################################################
-###  Plot the true CATE 
+#### True regression coefficients for the Poisson component
 beta = matrix(c(1, 0, -0.3,  0, 0, 0,
                 1, 0, -0.3,  0.1, 0, 0.5,
                 1, 0, -0.3,  0.5, 0, 0.5,
                 1, 0, -0.3,  0.7, 0, 0.5), 4, 6, byrow = TRUE)
+
+#### True regression coefficients for the zero component
 alpha = matrix(c(-1, 0, 0.5, 0, 0, 0,
                  -1, 0, 0.5, -0.5, 0, -0.1), 2, 6, byrow = TRUE)
-
+##############################################################################
+##############################################################################
+###  Plot the true CATE 
 
 pte.null = ComputeTruePTE(beta[1,], alpha[1,], seq(-4, 4, length=100))
 pte.small = ComputeTruePTE(beta[2, ], alpha[2,], seq(-4, 4, length=100))
